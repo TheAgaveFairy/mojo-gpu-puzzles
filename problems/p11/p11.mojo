@@ -22,11 +22,31 @@ fn conv_1d_simple[
 ](
     out: LayoutTensor[mut=False, dtype, out_layout],
     a: LayoutTensor[mut=False, dtype, in_layout],
-    b: LayoutTensor[mut=False, dtype, in_layout],
+    b: LayoutTensor[mut=False, dtype, in_layout], # conv_layout? was in_
 ):
-    global_i = block_dim.x * block_idx.x + thread_idx.x
-    local_i = thread_idx.x
+    gi = block_dim.x * block_idx.x + thread_idx.x
+    li = thread_idx.x
     # FILL ME IN (roughly 14 lines)
+    shared_a = tb[dtype]().row_major[SIZE]().shared().alloc()
+    shared_b = tb[dtype]().row_major[CONV]().shared().alloc()
+
+    if gi < SIZE:
+        shared_a[li] = a[gi]
+    if gi < CONV:
+        shared_b[li] = b[gi]
+
+    barrier()
+
+    if gi < SIZE:
+        var temp: out.element_type = 0
+
+        @parameter # unroll b/c CONV known
+        for j in range(CONV):
+            if li + j < SIZE:
+                temp += shared_a[li + j] * shared_b[j]
+
+        out[gi] = temp
+
 
 
 # ANCHOR_END: conv_1d_simple
@@ -43,11 +63,39 @@ fn conv_1d_block_boundary[
 ](
     out: LayoutTensor[mut=False, dtype, out_layout],
     a: LayoutTensor[mut=False, dtype, in_layout],
-    b: LayoutTensor[mut=False, dtype, in_layout],
+    b: LayoutTensor[mut=False, dtype,  in_layout], #conv_layout? was in_
 ):
-    global_i = block_dim.x * block_idx.x + thread_idx.x
-    local_i = thread_idx.x
+    #global_i = block_dim.x * block_idx.x + thread_idx.x
+    #local_i = thread_idx.x
     # FILL ME IN (roughly 18 lines)
+    gi = block_dim.x * block_idx.x + thread_idx.x
+    li = thread_idx.x
+    #alias OUTSIZE = SIZE_2 - CONV_2 + 1
+    shared_a = tb[dtype]().row_major[TPB + CONV_2 - 1]().shared().alloc()
+    shared_b = tb[dtype]().row_major[CONV_2]().shared().alloc()
+
+    if gi < SIZE_2:
+        shared_a[li] = a[gi]
+
+    if li < CONV_2 - 1:
+        next_idx = gi + TPB
+        if next_idx < SIZE_2:
+            shared_a[TPB + li] = a[next_idx]
+
+    if li < CONV_2:
+        shared_b[li] = b[li]
+
+    barrier()
+
+    if gi < SIZE_2:
+        var temp: out.element_type = 0
+
+        @parameter
+        for j in range(CONV_2):
+            if li + j < TPB + CONV_2 - 1:
+                temp += shared_a[li + j] * shared_b[j]
+
+        out[gi] = temp
 
 
 # ANCHOR_END: conv_1d_block_boundary

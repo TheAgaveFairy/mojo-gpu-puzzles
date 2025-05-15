@@ -20,7 +20,31 @@ fn dot_product(
     size: Int,
 ):
     # FILL ME IN (roughly 13 lines)
-    ...
+    shared = stack_allocation[
+            TPB,
+            Scalar[dtype],
+            address_space = AddressSpace.SHARED,
+            ]()
+
+    gi = block_idx.x * block_dim.x + thread_idx.x
+    li = thread_idx.x
+
+    if gi < size:
+        shared[li] = a[gi] * b[gi]
+
+    barrier()
+
+    # reduce
+    stride = TPB // 2
+    while stride:
+        if li < stride:
+            shared[li] += shared[li + stride]
+        barrier()
+        stride //= 2
+
+    if li == 0: # root thread
+        out[0] = shared[0]
+
 
 
 # ANCHOR_END: dot_product
